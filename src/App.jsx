@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Plus, Trash2, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, AlertCircle, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, MousePointer2 } from 'lucide-react';
 
 export default function App() {
   // State untuk menyimpan daftar node (ide/cabang)
@@ -10,128 +10,83 @@ export default function App() {
   // State interaksi
   const [selectedNodeId, setSelectedNodeId] = useState('root');
   const [editingNodeId, setEditingNodeId] = useState(null);
-  const [draggingNodeId, setDraggingNodeId] = useState(null);
-  const [isHolding, setIsHolding] = useState(false); // State baru untuk tanda sedang ditahan
+  const [moveStep, setMoveStep] = useState(50); // Jarak pergeseran manual
   
-  // Ref untuk timer long press
-  const holdTimerRef = useRef(null);
-  const LONG_PRESS_DURATION = 400; // Durasi hold dalam milidetik
-
-  // Offset untuk memastikan drag & drop mulus
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [message, setMessage] = useState('');
 
   // Referensi untuk area canvas
   const containerRef = useRef(null);
   const wrapperRef = useRef(null);
 
-  // Pusatkan scroll ke node utama saat pertama kali dimuat
-  useEffect(() => {
-    if (wrapperRef.current) {
-      wrapperRef.current.scrollLeft = 1500 - window.innerWidth / 2;
-      wrapperRef.current.scrollTop = 1500 - window.innerHeight / 2;
+  // Pusatkan scroll ke node aktif
+  const focusOnNode = (node) => {
+    if (wrapperRef.current && node) {
+      wrapperRef.current.scrollTo({
+        left: node.x - window.innerWidth / 2,
+        top: node.y - window.innerHeight / 2,
+        behavior: 'smooth'
+      });
     }
+  };
+
+  useEffect(() => {
+    const root = nodes.find(n => n.id === 'root');
+    focusOnNode(root);
   }, []);
 
-  // Fungsi untuk memulai timer deteksi "Hold"
-  const initiateHold = (clientX, clientY, id) => {
-    const node = nodes.find(n => n.id === id);
-    if (!node || !containerRef.current) return;
+  // Fungsi Gerak Manual
+  const moveNodeManual = (direction) => {
+    if (!selectedNodeId) return;
 
+    setNodes(prevNodes => {
+      const newNodes = prevNodes.map(n => {
+        if (n.id === selectedNodeId) {
+          let newX = n.x;
+          let newY = n.y;
+
+          if (direction === 'up') newY -= moveStep;
+          if (direction === 'down') newY += moveStep;
+          if (direction === 'left') newX -= moveStep;
+          if (direction === 'right') newX += moveStep;
+
+          // Batasan kanvas
+          newX = Math.max(50, Math.min(2950, newX));
+          newY = Math.max(50, Math.min(2950, newY));
+
+          const updatedNode = { ...n, x: newX, y: newY };
+          // Fokuskan kamera ke node yang sedang digeser
+          focusOnNode(updatedNode);
+          return updatedNode;
+        }
+        return n;
+      });
+      return newNodes;
+    });
+  };
+
+  const handleNodeClick = (id) => {
     setSelectedNodeId(id);
-    
-    // Bersihkan timer sebelumnya jika ada
-    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
-
-    // Set timer baru
-    holdTimerRef.current = setTimeout(() => {
-      const rect = containerRef.current.getBoundingClientRect();
-      const x = clientX - rect.left;
-      const y = clientY - rect.top;
-      
-      setDragOffset({ x: x - node.x, y: y - node.y });
-      setDraggingNodeId(id);
-      setIsHolding(true); // Memberikan feedback visual
-
-      // Berikan getaran halus jika di dukung perangkat (Android)
-      if (window.navigator && window.navigator.vibrate) {
-        window.navigator.vibrate(50);
-      }
-    }, LONG_PRESS_DURATION);
-  };
-
-  const cancelHold = () => {
-    if (holdTimerRef.current) {
-      clearTimeout(holdTimerRef.current);
-      holdTimerRef.current = null;
-    }
-    setDraggingNodeId(null);
-    setIsHolding(false);
-  };
-
-  // Handler Mouse
-  const handleNodeMouseDown = (e, id) => {
-    e.stopPropagation();
-    initiateHold(e.clientX, e.clientY, id);
-  };
-
-  // Handler Touch (Android/iOS)
-  const handleNodeTouchStart = (e, id) => {
-    const touch = e.touches[0];
-    initiateHold(touch.clientX, touch.clientY, id);
-  };
-
-  const handleCanvasMouseDown = () => {
-    setSelectedNodeId(null);
     setEditingNodeId(null);
     setMessage('');
   };
 
-  // Logika pergerakan (Mouse & Touch)
-  const moveDragging = (clientX, clientY) => {
-    if (!draggingNodeId || !containerRef.current) return;
-    
-    const rect = containerRef.current.getBoundingClientRect();
-    const mouseX = clientX - rect.left;
-    const mouseY = clientY - rect.top;
-
-    const newX = Math.max(50, Math.min(2950, mouseX - dragOffset.x));
-    const newY = Math.max(50, Math.min(2950, mouseY - dragOffset.y));
-
-    setNodes(nodes.map(n => 
-      n.id === draggingNodeId 
-        ? { ...n, x: newX, y: newY } 
-        : n
-    ));
-  };
-
-  const handleMouseMove = (e) => moveDragging(e.clientX, e.clientY);
-  
-  const handleTouchMove = (e) => {
-    if (draggingNodeId) {
-      // Mencegah layar bergeser/scroll saat kita sedang drag node
-      if (e.cancelable) e.preventDefault();
-      const touch = e.touches[0];
-      moveDragging(touch.clientX, touch.clientY);
-    } else {
-      // Jika user bergerak sebelum timer selesai, batalkan hold
-      if (holdTimerRef.current) {
-        clearTimeout(holdTimerRef.current);
-        holdTimerRef.current = null;
-      }
+  const handleCanvasClick = (e) => {
+    if (e.target === e.currentTarget || e.target.id === 'canvas-grid') {
+      setSelectedNodeId(null);
+      setEditingNodeId(null);
     }
   };
 
   const handleAddChild = () => {
     if (!selectedNodeId) {
-      setMessage('Pilih node terlebih dahulu untuk menambahkan cabang.');
+      setMessage('Pilih node terlebih dahulu.');
       return;
     }
     const parent = nodes.find(n => n.id === selectedNodeId);
     const newNode = {
       id: Date.now().toString(),
       text: 'Ide Baru',
-      x: parent.x + 200,
+      x: parent.x + 150,
       y: parent.y + (Math.random() * 100 - 50),
       parentId: parent.id
     };
@@ -139,12 +94,12 @@ export default function App() {
     setSelectedNodeId(newNode.id);
     setEditingNodeId(newNode.id);
     setMessage('');
+    focusOnNode(newNode);
   };
 
   const handleDeleteNode = () => {
-    if (!selectedNodeId) return;
-    if (selectedNodeId === 'root') {
-      setMessage('Node utama tidak dapat dihapus.');
+    if (!selectedNodeId || selectedNodeId === 'root') {
+      setMessage(selectedNodeId === 'root' ? 'Node utama tidak bisa dihapus.' : 'Pilih node.');
       return;
     }
     
@@ -160,17 +115,11 @@ export default function App() {
     const toDelete = [selectedNodeId, ...getDescendants(selectedNodeId, nodes).map(n => n.id)];
     setNodes(nodes.filter(n => !toDelete.includes(n.id)));
     setSelectedNodeId(null);
-    setMessage('');
   };
 
   const renderLine = (parent, child) => {
     const dx = child.x - parent.x;
-    const controlPointX1 = parent.x + dx * 0.5;
-    const controlPointY1 = parent.y;
-    const controlPointX2 = child.x - dx * 0.5;
-    const controlPointY2 = child.y;
-
-    const path = `M ${parent.x} ${parent.y} C ${controlPointX1} ${controlPointY1}, ${controlPointX2} ${controlPointY2}, ${child.x} ${child.y}`;
+    const path = `M ${parent.x} ${parent.y} C ${parent.x + dx * 0.5} ${parent.y}, ${child.x - dx * 0.5} ${child.y}, ${child.x} ${child.y}`;
 
     return (
       <path 
@@ -185,115 +134,140 @@ export default function App() {
   };
 
   return (
-    <div className="flex flex-col w-full h-screen bg-slate-100 font-sans overflow-hidden">
+    <div className="flex flex-col w-full h-screen bg-slate-100 font-sans overflow-hidden relative">
       
       {/* Toolbar Atas */}
-      <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur-md px-2 py-2 rounded-2xl shadow-lg border border-slate-200 flex items-center gap-2 z-20">
-        <button 
-          onClick={handleAddChild} 
-          className="flex items-center gap-2 px-4 py-2 hover:bg-slate-100 rounded-xl transition-colors text-sm font-semibold text-slate-700"
-        >
-          <Plus size={18} /> Tambah Cabang
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur-md px-3 py-2 rounded-2xl shadow-xl border border-slate-200 flex items-center gap-2 z-30 w-[90%] max-w-md justify-around">
+        <button onClick={handleAddChild} className="flex flex-col items-center gap-1 p-2 hover:bg-slate-50 rounded-xl transition-colors">
+          <Plus size={20} className="text-blue-600" />
+          <span className="text-[10px] font-bold text-slate-500 uppercase">Tambah</span>
         </button>
-        <div className="w-px h-6 bg-slate-200 mx-1"></div>
-        <button 
-          onClick={handleDeleteNode} 
-          className="flex items-center gap-2 px-4 py-2 hover:bg-red-50 text-red-600 rounded-xl transition-colors text-sm font-semibold"
-        >
-          <Trash2 size={18} /> Hapus
+        <div className="w-px h-8 bg-slate-200"></div>
+        <button onClick={handleDeleteNode} className="flex flex-col items-center gap-1 p-2 hover:bg-red-50 rounded-xl transition-colors">
+          <Trash2 size={20} className="text-red-500" />
+          <span className="text-[10px] font-bold text-slate-500 uppercase">Hapus</span>
+        </button>
+        <div className="w-px h-8 bg-slate-200"></div>
+        <button onClick={() => focusOnNode(nodes.find(n => n.id === selectedNodeId) || nodes[0])} className="flex flex-col items-center gap-1 p-2 hover:bg-slate-50 rounded-xl transition-colors">
+          <MousePointer2 size={20} className="text-slate-600" />
+          <span className="text-[10px] font-bold text-slate-500 uppercase">Fokus</span>
         </button>
       </div>
 
+      {/* Pesan Error/Info */}
       {message && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-red-100 text-red-700 px-4 py-3 rounded-xl shadow-md border border-red-200 flex items-center gap-3 z-20 animate-bounce">
-          <AlertCircle size={20} />
-          <span className="text-sm font-medium">{message}</span>
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-red-500 text-white px-4 py-2 rounded-full shadow-lg text-xs font-bold z-30 animate-pulse">
+          {message}
+        </div>
+      )}
+
+      {/* Kontrol Gerak Manual (D-Pad) */}
+      {selectedNodeId && (
+        <div className="absolute bottom-6 right-6 z-40 flex flex-col items-center gap-2">
+          <div className="bg-white/90 backdrop-blur-md p-4 rounded-3xl shadow-2xl border border-slate-200 flex flex-col items-center gap-2">
+            <button onClick={() => moveNodeManual('up')} className="p-3 bg-slate-100 rounded-full active:bg-blue-500 active:text-white shadow-sm">
+              <ChevronUp size={24} />
+            </button>
+            <div className="flex gap-4">
+              <button onClick={() => moveNodeManual('left')} className="p-3 bg-slate-100 rounded-full active:bg-blue-500 active:text-white shadow-sm">
+                <ChevronLeft size={24} />
+              </button>
+              <button onClick={() => moveNodeManual('right')} className="p-3 bg-slate-100 rounded-full active:bg-blue-500 active:text-white shadow-sm">
+                <ChevronRight size={24} />
+              </button>
+            </div>
+            <button onClick={() => moveNodeManual('down')} className="p-3 bg-slate-100 rounded-full active:bg-blue-500 active:text-white shadow-sm">
+              <ChevronDown size={24} />
+            </button>
+          </div>
+          
+          {/* Switch Jarak Gerak */}
+          <div className="flex bg-white rounded-full p-1 shadow-md border border-slate-200 overflow-hidden">
+            <button 
+              onClick={() => setMoveStep(20)} 
+              className={`px-3 py-1 text-[10px] font-bold rounded-full transition-all ${moveStep === 20 ? 'bg-blue-500 text-white' : 'text-slate-400'}`}
+            >
+              HALUS
+            </button>
+            <button 
+              onClick={() => setMoveStep(100)} 
+              className={`px-3 py-1 text-[10px] font-bold rounded-full transition-all ${moveStep === 100 ? 'bg-blue-500 text-white' : 'text-slate-400'}`}
+            >
+              JAUH
+            </button>
+          </div>
         </div>
       )}
 
       {/* Area Canvas */}
       <div 
         ref={wrapperRef}
-        className="flex-1 overflow-auto relative scroll-smooth"
-        onMouseUp={cancelHold}
-        onMouseLeave={cancelHold}
-        onTouchEnd={cancelHold}
+        className="flex-1 overflow-auto relative touch-none bg-slate-50"
+        onClick={handleCanvasClick}
       >
         <div 
           ref={containerRef}
-          className="absolute w-[3000px] h-[3000px] bg-slate-50"
+          id="canvas-grid"
+          className="absolute w-[3000px] h-[3000px]"
           style={{
             backgroundImage: 'radial-gradient(#cbd5e1 1.5px, transparent 1.5px)',
-            backgroundSize: '24px 24px'
+            backgroundSize: '30px 30px'
           }}
-          onMouseDown={handleCanvasMouseDown}
-          onMouseMove={handleMouseMove}
-          onTouchMove={handleTouchMove}
         >
-          <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-0">
+          <svg className="absolute top-0 left-0 w-full h-full pointer-events-none">
             {nodes.filter(n => n.parentId).map(node => {
               const parent = nodes.find(n => n.id === node.parentId);
               return parent ? renderLine(parent, node) : null;
             })}
           </svg>
 
-          {nodes.map(node => {
-            const isDraggingThis = draggingNodeId === node.id;
-            return (
-              <div
-                key={node.id}
-                style={{ 
-                  left: node.x, 
-                  top: node.y, 
-                  transform: `translate(-50%, -50%) ${isDraggingThis ? 'scale(1.1)' : 'scale(1)'}`,
-                  touchAction: 'none'
-                }}
-                className={`absolute px-5 py-3 rounded-xl border-2 select-none transition-all duration-150 ${
-                  selectedNodeId === node.id 
-                    ? 'border-blue-500 shadow-lg z-10' 
-                    : 'border-slate-200 shadow-sm hover:border-slate-300 z-0'
-                } ${
-                  node.id === 'root' 
-                    ? 'bg-blue-50 border-blue-300' 
-                    : 'bg-white'
-                } ${
-                  isDraggingThis ? 'cursor-grabbing opacity-80' : 'cursor-grab'
-                }`}
-                onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
-                onTouchStart={(e) => handleNodeTouchStart(e, node.id)}
-                onDoubleClick={() => {
-                  setEditingNodeId(node.id);
-                  setSelectedNodeId(node.id);
-                }}
-              >
-                {editingNodeId === node.id ? (
-                  <input
-                    autoFocus
-                    value={node.text}
-                    onChange={(e) => {
-                      setNodes(nodes.map(n => n.id === node.id ? { ...n, text: e.target.value } : n));
-                    }}
-                    onBlur={() => setEditingNodeId(null)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') setEditingNodeId(null);
-                    }}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onTouchStart={(e) => e.stopPropagation()}
-                    className="outline-none text-center bg-transparent font-medium text-slate-800 placeholder-slate-400"
-                    style={{ width: `${Math.max(node.text.length, 5)}ch` }}
-                    placeholder="Ketik ide..."
-                  />
-                ) : (
-                  <div className="font-medium text-slate-800 whitespace-nowrap">
-                    {node.text}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          {nodes.map(node => (
+            <div
+              key={node.id}
+              style={{ 
+                left: node.x, 
+                top: node.y, 
+                transform: 'translate(-50%, -50%)',
+              }}
+              className={`absolute px-6 py-4 rounded-2xl border-2 select-none transition-all duration-300 min-w-[100px] text-center ${
+                selectedNodeId === node.id 
+                  ? 'border-blue-500 bg-blue-50 shadow-2xl scale-110 z-20' 
+                  : 'border-slate-200 bg-white shadow-md z-10'
+              }`}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleNodeClick(node.id);
+              }}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                setEditingNodeId(node.id);
+              }}
+            >
+              {editingNodeId === node.id ? (
+                <input
+                  autoFocus
+                  className="bg-transparent border-b-2 border-blue-400 outline-none text-center font-bold text-slate-800 w-full"
+                  value={node.text}
+                  onChange={(e) => setNodes(nodes.map(n => n.id === node.id ? { ...n, text: e.target.value } : n))}
+                  onBlur={() => setEditingNodeId(null)}
+                  onKeyDown={(e) => e.key === 'Enter' && setEditingNodeId(null)}
+                />
+              ) : (
+                <div className="font-bold text-slate-700 leading-tight">
+                  {node.text}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       </div>
       
+      {/* Instruksi Singkat */}
+      {!selectedNodeId && (
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-slate-800/80 text-white px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest pointer-events-none">
+          Ketuk Node Untuk Memindahkan
+        </div>
+      )}
     </div>
   );
 }
