@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from 'react';
-import './index.css';
 import { Plus, Trash2, AlertCircle } from 'lucide-react';
 
 export default function App() {
@@ -13,15 +12,15 @@ export default function App() {
   const [editingNodeId, setEditingNodeId] = useState(null);
   const [draggingNodeId, setDraggingNodeId] = useState(null);
   
-  // Offset untuk memastikan drag & drop mulus (tidak patah ke tengah kursor)
+  // Offset untuk memastikan drag & drop mulus
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [message, setMessage] = useState('');
 
-  // Referensi untuk area canvas yang bisa di-scroll
+  // Referensi untuk area canvas
   const containerRef = useRef(null);
   const wrapperRef = useRef(null);
 
-  // Pusatkan scroll ke node utama saat aplikasi pertama kali dimuat
+  // Pusatkan scroll ke node utama saat pertama kali dimuat
   useEffect(() => {
     if (wrapperRef.current) {
       wrapperRef.current.scrollLeft = 1500 - window.innerWidth / 2;
@@ -29,38 +28,48 @@ export default function App() {
     }
   }, []);
 
-  // Handler saat sebuah node mulai diklik/diseret
-  const handleNodeMouseDown = (e, id) => {
-    e.stopPropagation();
+  // Fungsi pembantu untuk memulai drag (bisa dipanggil oleh Mouse atau Touch)
+  const startDragging = (clientX, clientY, id) => {
     const node = nodes.find(n => n.id === id);
     if (!node || !containerRef.current) return;
     
     const rect = containerRef.current.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
     
-    setDragOffset({ x: mouseX - node.x, y: mouseY - node.y });
+    setDragOffset({ x: x - node.x, y: y - node.y });
     setDraggingNodeId(id);
     setSelectedNodeId(id);
     setMessage('');
   };
 
-  // Handler saat area kosong di canvas diklik (membatalkan seleksi)
+  // Handler Mouse
+  const handleNodeMouseDown = (e, id) => {
+    e.stopPropagation();
+    startDragging(e.clientX, e.clientY, id);
+  };
+
+  // Handler Touch (Android/iOS)
+  const handleNodeTouchStart = (e, id) => {
+    // e.stopPropagation() mungkin tidak cukup di touch, tapi kita coba dulu
+    const touch = e.touches[0];
+    startDragging(touch.clientX, touch.clientY, id);
+  };
+
   const handleCanvasMouseDown = () => {
     setSelectedNodeId(null);
     setEditingNodeId(null);
     setMessage('');
   };
 
-  // Handler untuk proses drag & drop
-  const handleMouseMove = (e) => {
+  // Logika pergerakan (Mouse & Touch)
+  const moveDragging = (clientX, clientY) => {
     if (!draggingNodeId || !containerRef.current) return;
     
     const rect = containerRef.current.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+    const mouseX = clientX - rect.left;
+    const mouseY = clientY - rect.top;
 
-    // Batasi pergerakan agar tidak keluar dari batas area 3000x3000
     const newX = Math.max(50, Math.min(2950, mouseX - dragOffset.x));
     const newY = Math.max(50, Math.min(2950, mouseY - dragOffset.y));
 
@@ -71,12 +80,19 @@ export default function App() {
     ));
   };
 
-  // Handler saat mouse dilepas setelah drag
-  const handleMouseUp = () => {
-    setDraggingNodeId(null);
+  const handleMouseMove = (e) => moveDragging(e.clientX, e.clientY);
+  
+  const handleTouchMove = (e) => {
+    if (draggingNodeId) {
+      // Mencegah layar bergeser/scroll saat kita sedang drag node
+      if (e.cancelable) e.preventDefault();
+      const touch = e.touches[0];
+      moveDragging(touch.clientX, touch.clientY);
+    }
   };
 
-  // Fungsi menambah node/cabang baru
+  const stopDragging = () => setDraggingNodeId(null);
+
   const handleAddChild = () => {
     if (!selectedNodeId) {
       setMessage('Pilih node terlebih dahulu untuk menambahkan cabang.');
@@ -86,17 +102,16 @@ export default function App() {
     const newNode = {
       id: Date.now().toString(),
       text: 'Ide Baru',
-      x: parent.x + 200, // Geser sedikit ke kanan dari parent
-      y: parent.y + (Math.random() * 100 - 50), // Posisi Y sedikit diacak agar tidak menumpuk
+      x: parent.x + 200,
+      y: parent.y + (Math.random() * 100 - 50),
       parentId: parent.id
     };
     setNodes([...nodes, newNode]);
     setSelectedNodeId(newNode.id);
-    setEditingNodeId(newNode.id); // Langsung masuk mode edit teks
+    setEditingNodeId(newNode.id);
     setMessage('');
   };
 
-  // Fungsi menghapus node dan seluruh anak cabangnya
   const handleDeleteNode = () => {
     if (!selectedNodeId) return;
     if (selectedNodeId === 'root') {
@@ -104,7 +119,6 @@ export default function App() {
       return;
     }
     
-    // Fungsi rekursif untuk mencari semua anak cabang
     const getDescendants = (id, allNodes) => {
       const children = allNodes.filter(n => n.parentId === id);
       let descendants = [...children];
@@ -120,11 +134,8 @@ export default function App() {
     setMessage('');
   };
 
-  // Render garis lengkung (bezier curve) penghubung antar node
   const renderLine = (parent, child) => {
     const dx = child.x - parent.x;
-    
-    // Titik kontrol lengkungan bezier
     const controlPointX1 = parent.x + dx * 0.5;
     const controlPointY1 = parent.y;
     const controlPointX2 = child.x - dx * 0.5;
@@ -137,7 +148,7 @@ export default function App() {
         key={`line-${child.id}`}
         d={path}
         fill="none"
-        stroke="#cbd5e1" // Warna slate-300
+        stroke="#cbd5e1"
         strokeWidth="3"
         strokeLinecap="round"
       />
@@ -164,7 +175,6 @@ export default function App() {
         </button>
       </div>
 
-      {/* Peringatan (Toast) */}
       {message && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-red-100 text-red-700 px-4 py-3 rounded-xl shadow-md border border-red-200 flex items-center gap-3 z-20 animate-bounce">
           <AlertCircle size={20} />
@@ -172,22 +182,13 @@ export default function App() {
         </div>
       )}
 
-      {/* Panel Instruksi */}
-      <div className="absolute bottom-6 right-6 bg-white/80 backdrop-blur-sm p-4 rounded-xl shadow-sm border border-slate-200 text-sm text-slate-600 max-w-xs z-20">
-        <p className="font-semibold mb-2 text-slate-800">Cara Penggunaan:</p>
-        <ul className="list-disc pl-5 space-y-1.5 marker:text-slate-400">
-          <li><strong>Klik</strong> untuk memilih node.</li>
-          <li><strong>Klik Ganda</strong> untuk mengubah teks.</li>
-          <li><strong>Drag & Drop</strong> untuk memindahkan node.</li>
-        </ul>
-      </div>
-
-      {/* Area Canvas (Bisa Di-scroll untuk efek tak terbatas) */}
+      {/* Area Canvas */}
       <div 
         ref={wrapperRef}
         className="flex-1 overflow-auto relative scroll-smooth"
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+        onMouseUp={stopDragging}
+        onMouseLeave={stopDragging}
+        onTouchEnd={stopDragging}
       >
         <div 
           ref={containerRef}
@@ -198,8 +199,8 @@ export default function App() {
           }}
           onMouseDown={handleCanvasMouseDown}
           onMouseMove={handleMouseMove}
+          onTouchMove={handleTouchMove}
         >
-          {/* Layer SVG untuk Garis Penghubung */}
           <svg className="absolute top-0 left-0 w-full h-full pointer-events-none z-0">
             {nodes.filter(n => n.parentId).map(node => {
               const parent = nodes.find(n => n.id === node.parentId);
@@ -207,11 +208,15 @@ export default function App() {
             })}
           </svg>
 
-          {/* Layer DOM untuk Node */}
           {nodes.map(node => (
             <div
               key={node.id}
-              style={{ left: node.x, top: node.y, transform: 'translate(-50%, -50%)' }}
+              style={{ 
+                left: node.x, 
+                top: node.y, 
+                transform: 'translate(-50%, -50%)',
+                touchAction: 'none' // Sangat penting agar Android tidak melakukan scroll saat drag
+              }}
               className={`absolute px-5 py-3 rounded-xl border-2 cursor-grab active:cursor-grabbing select-none transition-shadow ${
                 selectedNodeId === node.id 
                   ? 'border-blue-500 shadow-lg z-10' 
@@ -222,6 +227,7 @@ export default function App() {
                   : 'bg-white'
               }`}
               onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
+              onTouchStart={(e) => handleNodeTouchStart(e, node.id)}
               onDoubleClick={() => {
                 setEditingNodeId(node.id);
                 setSelectedNodeId(node.id);
@@ -238,7 +244,8 @@ export default function App() {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') setEditingNodeId(null);
                   }}
-                  onMouseDown={(e) => e.stopPropagation()} // Mencegah drag saat klik di dalam input text
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
                   className="outline-none text-center bg-transparent font-medium text-slate-800 placeholder-slate-400"
                   style={{ width: `${Math.max(node.text.length, 5)}ch` }}
                   placeholder="Ketik ide..."
