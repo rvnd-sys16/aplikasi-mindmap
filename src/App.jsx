@@ -11,7 +11,12 @@ export default function App() {
   const [selectedNodeId, setSelectedNodeId] = useState('root');
   const [editingNodeId, setEditingNodeId] = useState(null);
   const [draggingNodeId, setDraggingNodeId] = useState(null);
+  const [isHolding, setIsHolding] = useState(false); // State baru untuk tanda sedang ditahan
   
+  // Ref untuk timer long press
+  const holdTimerRef = useRef(null);
+  const LONG_PRESS_DURATION = 400; // Durasi hold dalam milidetik
+
   // Offset untuk memastikan drag & drop mulus
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [message, setMessage] = useState('');
@@ -28,32 +33,52 @@ export default function App() {
     }
   }, []);
 
-  // Fungsi pembantu untuk memulai drag (bisa dipanggil oleh Mouse atau Touch)
-  const startDragging = (clientX, clientY, id) => {
+  // Fungsi untuk memulai timer deteksi "Hold"
+  const initiateHold = (clientX, clientY, id) => {
     const node = nodes.find(n => n.id === id);
     if (!node || !containerRef.current) return;
-    
-    const rect = containerRef.current.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
-    
-    setDragOffset({ x: x - node.x, y: y - node.y });
-    setDraggingNodeId(id);
+
     setSelectedNodeId(id);
-    setMessage('');
+    
+    // Bersihkan timer sebelumnya jika ada
+    if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+
+    // Set timer baru
+    holdTimerRef.current = setTimeout(() => {
+      const rect = containerRef.current.getBoundingClientRect();
+      const x = clientX - rect.left;
+      const y = clientY - rect.top;
+      
+      setDragOffset({ x: x - node.x, y: y - node.y });
+      setDraggingNodeId(id);
+      setIsHolding(true); // Memberikan feedback visual
+
+      // Berikan getaran halus jika di dukung perangkat (Android)
+      if (window.navigator && window.navigator.vibrate) {
+        window.navigator.vibrate(50);
+      }
+    }, LONG_PRESS_DURATION);
+  };
+
+  const cancelHold = () => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+    setDraggingNodeId(null);
+    setIsHolding(false);
   };
 
   // Handler Mouse
   const handleNodeMouseDown = (e, id) => {
     e.stopPropagation();
-    startDragging(e.clientX, e.clientY, id);
+    initiateHold(e.clientX, e.clientY, id);
   };
 
   // Handler Touch (Android/iOS)
   const handleNodeTouchStart = (e, id) => {
-    // e.stopPropagation() mungkin tidak cukup di touch, tapi kita coba dulu
     const touch = e.touches[0];
-    startDragging(touch.clientX, touch.clientY, id);
+    initiateHold(touch.clientX, touch.clientY, id);
   };
 
   const handleCanvasMouseDown = () => {
@@ -88,10 +113,14 @@ export default function App() {
       if (e.cancelable) e.preventDefault();
       const touch = e.touches[0];
       moveDragging(touch.clientX, touch.clientY);
+    } else {
+      // Jika user bergerak sebelum timer selesai, batalkan hold
+      if (holdTimerRef.current) {
+        clearTimeout(holdTimerRef.current);
+        holdTimerRef.current = null;
+      }
     }
   };
-
-  const stopDragging = () => setDraggingNodeId(null);
 
   const handleAddChild = () => {
     if (!selectedNodeId) {
@@ -186,9 +215,9 @@ export default function App() {
       <div 
         ref={wrapperRef}
         className="flex-1 overflow-auto relative scroll-smooth"
-        onMouseUp={stopDragging}
-        onMouseLeave={stopDragging}
-        onTouchEnd={stopDragging}
+        onMouseUp={cancelHold}
+        onMouseLeave={cancelHold}
+        onTouchEnd={cancelHold}
       >
         <div 
           ref={containerRef}
@@ -208,55 +237,60 @@ export default function App() {
             })}
           </svg>
 
-          {nodes.map(node => (
-            <div
-              key={node.id}
-              style={{ 
-                left: node.x, 
-                top: node.y, 
-                transform: 'translate(-50%, -50%)',
-                touchAction: 'none' // Sangat penting agar Android tidak melakukan scroll saat drag
-              }}
-              className={`absolute px-5 py-3 rounded-xl border-2 cursor-grab active:cursor-grabbing select-none transition-shadow ${
-                selectedNodeId === node.id 
-                  ? 'border-blue-500 shadow-lg z-10' 
-                  : 'border-slate-200 shadow-sm hover:border-slate-300 z-0'
-              } ${
-                node.id === 'root' 
-                  ? 'bg-blue-50 border-blue-300' 
-                  : 'bg-white'
-              }`}
-              onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
-              onTouchStart={(e) => handleNodeTouchStart(e, node.id)}
-              onDoubleClick={() => {
-                setEditingNodeId(node.id);
-                setSelectedNodeId(node.id);
-              }}
-            >
-              {editingNodeId === node.id ? (
-                <input
-                  autoFocus
-                  value={node.text}
-                  onChange={(e) => {
-                    setNodes(nodes.map(n => n.id === node.id ? { ...n, text: e.target.value } : n));
-                  }}
-                  onBlur={() => setEditingNodeId(null)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') setEditingNodeId(null);
-                  }}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onTouchStart={(e) => e.stopPropagation()}
-                  className="outline-none text-center bg-transparent font-medium text-slate-800 placeholder-slate-400"
-                  style={{ width: `${Math.max(node.text.length, 5)}ch` }}
-                  placeholder="Ketik ide..."
-                />
-              ) : (
-                <div className="font-medium text-slate-800 whitespace-nowrap">
-                  {node.text}
-                </div>
-              )}
-            </div>
-          ))}
+          {nodes.map(node => {
+            const isDraggingThis = draggingNodeId === node.id;
+            return (
+              <div
+                key={node.id}
+                style={{ 
+                  left: node.x, 
+                  top: node.y, 
+                  transform: `translate(-50%, -50%) ${isDraggingThis ? 'scale(1.1)' : 'scale(1)'}`,
+                  touchAction: 'none'
+                }}
+                className={`absolute px-5 py-3 rounded-xl border-2 select-none transition-all duration-150 ${
+                  selectedNodeId === node.id 
+                    ? 'border-blue-500 shadow-lg z-10' 
+                    : 'border-slate-200 shadow-sm hover:border-slate-300 z-0'
+                } ${
+                  node.id === 'root' 
+                    ? 'bg-blue-50 border-blue-300' 
+                    : 'bg-white'
+                } ${
+                  isDraggingThis ? 'cursor-grabbing opacity-80' : 'cursor-grab'
+                }`}
+                onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
+                onTouchStart={(e) => handleNodeTouchStart(e, node.id)}
+                onDoubleClick={() => {
+                  setEditingNodeId(node.id);
+                  setSelectedNodeId(node.id);
+                }}
+              >
+                {editingNodeId === node.id ? (
+                  <input
+                    autoFocus
+                    value={node.text}
+                    onChange={(e) => {
+                      setNodes(nodes.map(n => n.id === node.id ? { ...n, text: e.target.value } : n));
+                    }}
+                    onBlur={() => setEditingNodeId(null)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') setEditingNodeId(null);
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onTouchStart={(e) => e.stopPropagation()}
+                    className="outline-none text-center bg-transparent font-medium text-slate-800 placeholder-slate-400"
+                    style={{ width: `${Math.max(node.text.length, 5)}ch` }}
+                    placeholder="Ketik ide..."
+                  />
+                ) : (
+                  <div className="font-medium text-slate-800 whitespace-nowrap">
+                    {node.text}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
       
